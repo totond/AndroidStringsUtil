@@ -114,4 +114,4 @@ if __name__ == '__main__':
     parser = initParser()
     parseParams(parser.parse_args())
     readDataSource()
-    print(json.dumps(regionMap, cls=MyEncoder))
+    print(json.dumps(regionMap, cls=MyEncoder,ensure_ascii=False))
