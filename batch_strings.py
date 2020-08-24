@@ -1,23 +1,15 @@
 ###
 ## 实现了输入文案列表的excel，输出对应的json：
 # {
-# 	"region_name": [{
-# 		"id": "trade_test_1",
-# 		"chi": "\u6d4b\u8bd51",
-# 		"tra": "\u6e2c\u8a661",
-# 		"eng": "Test1",
-# 		"region": "test_strings"
+#   "error_code": 0,
+#   "error_msg": "",
+# 	"data": [
+# 	{"region_name": "test_strings",
+# 	"strings": [{"id": "trade_test_1", "chi": "测试1", "tra": "測試1", "eng": "Test1", "region": "test_strings"}
 # 	},
 # 	...],
-#   "region_name_2":[...]
 # }
 #
-## todo
-## 1.中文乱码问题
-## 2.错误情况兼容,定义错误码和脚本处理：
-# a.输入了空的id，目前是跳过不处理
-# b.输入了空的region，目前放到空的key里面
-# c.输入了空的文案，目前无处理
 ###
 
 import pandas as pd
@@ -26,15 +18,39 @@ import argparse
 from json import JSONEncoder
 import json
 
+ERROR_CODE = "error_code"
+ERROR_MSG = "error_msg"
+
+OPEN_FILE_ERROR = 1
+OPEN_FILE_ERROR_MSG = "打开Excel异常，请确认路径和Sheet名是否正确"
+DATA_NULL_ERROR = 2
+DATA_NULL_ERROR_MSG = "输入为空，请检查输入"
+
+SUCCESS = 0
+
+REGION_NULL_WARNING = -1
+REGION_NULL_WARNING_MSG = "检查到输入有空的region，已正常加入到strings。如非本意，请检查输入"
+ID_NULL_WARNING = -2
+ID_NULL_WARNING_MSG = "检查到输入有空的id，已跳过处理，请检查输入"
+STRING_NULL_WARNING = -3
+STRING_NULL_WARNING_MSG = "检查到输入有空的文案string，已正常加入到strings。如非本意，请检查输入"
 
 source_path = os.path.abspath(os.path.dirname(__file__)) + "\\strings_input.xlsx"
 sheet_name = "Sheet1"
 regionMap = {}
+regions = []
+result = {ERROR_CODE: 0, ERROR_MSG: ""}
 
 
 class MyEncoder(JSONEncoder):
     def default(self, o):
         return o.__dict__
+
+
+class RegionData(object):
+    def __init__(self, region, strings):
+        self.region_name = region
+        self.strings = strings
 
 
 class StringData(object):
@@ -65,19 +81,39 @@ def parseParams(args):
 
 
 def initParser():
-    parser = argparse.ArgumentParser(description='用于把excel中的神策埋点数据转化为实际代码的工具')
+    parser = argparse.ArgumentParser(description='用于把excel中的文案提炼成json的工具')
     parser.add_argument('--path', '-p', help='path 属性，代表输入数据的excel。非必要参数,默认值是当前目录下的strings_input')
     parser.add_argument('--sheet', '-s', help='sheet 属性，Excel表格中装载数据的Sheet名，默认为Sheet1')
     return parser
 
 
+
 def readDataSource():
-    d = pd.read_excel(source_path, sheet_name=sheet_name, na_values='blank', encoding="utf-8")
+    try:
+        d = pd.read_excel(source_path, sheet_name=sheet_name, na_values='blank', encoding="utf-8")
+    except BaseException:
+        result[ERROR_CODE] = OPEN_FILE_ERROR
+        result[ERROR_MSG] = OPEN_FILE_ERROR_MSG
+        return False
 
     parseData(d)
 
+    for key, values in regionMap.items():
+        regions.append(RegionData(key, values))
+
+    return True
+
 
 def parseData(source):
+    def checkStrNull(str):
+
+        if pd.isnull(str):
+            result[ERROR_CODE] = STRING_NULL_WARNING
+            result[ERROR_MSG] = STRING_NULL_WARNING_MSG
+            return ""
+        else:
+            return str
+
     def addMap(data: StringData):
         list = regionMap.get(data.region, None)
         if list is None:
@@ -98,14 +134,22 @@ def parseData(source):
         region = source.iloc[i, 4]
 
         if pd.isnull(sid):
+            result[ERROR_CODE] = ID_NULL_WARNING
+            result[ERROR_MSG] = ID_NULL_WARNING_MSG
             continue
 
         if pd.isnull(region):
+            result[ERROR_CODE] = REGION_NULL_WARNING
+            result[ERROR_MSG] = REGION_NULL_WARNING_MSG
             region = ""
 
-        string = StringData(sid, chi, tra, eng, region)
+        string = StringData(sid, checkStrNull(chi), checkStrNull(tra), checkStrNull(eng), region)
         addMap(string)
         allStrings.append(string)
+
+    if len(allStrings) == 0:
+        result[ERROR_CODE] = DATA_NULL_ERROR
+        result[ERROR_MSG] = DATA_NULL_ERROR_MSG
 
     return
 
@@ -114,4 +158,5 @@ if __name__ == '__main__':
     parser = initParser()
     parseParams(parser.parse_args())
     readDataSource()
-    print(json.dumps(regionMap, cls=MyEncoder,ensure_ascii=False))
+    result["data"] = regions
+    print(json.dumps(result, cls=MyEncoder, ensure_ascii=False))
